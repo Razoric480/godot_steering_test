@@ -8,12 +8,15 @@ onready var arrive_target 	:= GSAIAgentLocation.new()
 onready var arrive 			:= GSAIArrive.new(agent, arrive_target)
 onready var look 			:= GSAILookWhereYouGo.new(agent)
 onready var blend 			:= GSAIBlend.new(agent)
+onready var priority		:= GSAIPriority.new(agent)
 onready var avoid_prox		:= GSAIInfiniteProximity.new(agent, [])
 onready var avoid			:= GSAIAvoidCollisions.new(agent, avoid_prox)
 var _accel 					:= GSAITargetAcceleration.new()
 var _velocity 				:= Vector2.ZERO
 var _drag 					:= 0.1
 var enable_avoidance		:= true
+var elapsed_threshold := 2.0
+var elapsed := INF
 
 func _ready() -> void:
 	agent.position 					= GSAIUtils.to_vector3(kinematic_body.global_position)
@@ -26,8 +29,9 @@ func _ready() -> void:
 	agent.angular_drag_percentage 	= 0.4
 	agent.bounding_radius			= 10.0
 	arrive_target.position 			= agent.position
-	arrive.deceleration_radius 		= 99.0
-	arrive.arrival_tolerance 		= 100.0
+	arrive.deceleration_radius 		= 150.0
+	arrive.arrival_tolerance 		= 165.0
+	priority.zero_threshold = 100.0
 	
 	look.alignment_tolerance = deg2rad(10.0)
 	look.deceleration_radius = deg2rad(30)
@@ -35,7 +39,14 @@ func _ready() -> void:
 	blend.add(arrive, 1.0)
 	blend.add(look, 1.0)
 	if enable_avoidance:
-		blend.add(avoid, 1.0)
+		var avoid_blend := GSAIBlend.new(agent)
+		var avoid_look := GSAILookWhereYouGo.new(agent)
+		
+		avoid_blend.add(avoid_look, 1.0)
+		avoid_blend.add(avoid, 1.0)
+		
+		priority.add(avoid_blend)
+	priority.add(blend)
 
 func issue_arrive_order(arrive_position:Vector2):
 	#print ("[ShipSteering] issue_arrive_order: %s" % [arrive_position])
@@ -43,7 +54,8 @@ func issue_arrive_order(arrive_position:Vector2):
 	
 func _physics_process(delta: float) -> void:
 	# Add nearby agents to avoidance
-	if enable_avoidance:
+	if enable_avoidance and (avoid_prox.agents.size() == 0 or elapsed >= elapsed_threshold):
+		elapsed = 0.0
 		avoid_prox.agents.clear()
 		for u in nearby.nearby_units():
 			var other_steering = u.get_node("Steering")
@@ -55,7 +67,8 @@ func _physics_process(delta: float) -> void:
 					printerr("[ShipSteering] node doesnt have agent")
 			else:
 				printerr("[ShipSteering] node doesnt have steering")
-	blend.calculate_steering(_accel)
+	elapsed += delta
+	priority.calculate_steering(_accel)
 	
 	agent._apply_steering(_accel, delta)
 	
